@@ -108,7 +108,7 @@ def toggle_overlay():
     else:
         root.withdraw()
 
-keyboard.add_hotkey("F1", toggle_overlay)
+keyboard.add_hotkey("F2", toggle_overlay)
 
 # ──────────────────────────────────────────────
 # System tray
@@ -155,7 +155,7 @@ def update():
             f"🎮 GPU: {gpu_temp}\n"
             f"💾 RAM: {ram_usage:.1f}%\n"
             f"🌐 Ping: {ping_time}\n"
-            f"[F1 to toggle]"
+            f"[F2 to toggle]"
         )
     )
     root.after(1000, update)
