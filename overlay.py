@@ -131,7 +131,7 @@ def on_toggle(icon, item):
     toggle_overlay()
 
 menu = (
-    item("Toggle Overlay (F1)", on_toggle),
+    item("Toggle Overlay (F2)", on_toggle),
     item("Reload", on_reload),
     item("Exit", on_exit),
 )
