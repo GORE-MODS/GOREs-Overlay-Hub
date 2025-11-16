@@ -1,163 +1,215 @@
-import psutil, time, json, os, sys, threading
-from tkinter import Tk, Label
+import psutil, time, json, os, sys, keyboard
+from tkinter import Tk, Label, Canvas
 from ctypes import windll
-import win32gui, win32con
 from ping3 import ping
-import keyboard
+
+# ─── Music Metadata ───────────────────────────────────────────
+from pycaw.pycaw import AudioUtilities
+from comtypes import CoInitialize
+
+# ─── System Tray ──────────────────────────────────────────────
 import pystray
-from pystray import MenuItem as item
 from PIL import Image, ImageDraw
 
+# ─── Paths ────────────────────────────────────────────────────
 _appdata = os.getenv("APPDATA") or os.path.expanduser("~")
 CONFIG_PATH = os.path.join(_appdata, "OverlayHub_Config.json")
 
-# ──────────────────────────────────────────────
-# Safe temperature fetch
+# =====================================================================
+# SAFE TEMP READING
+# =====================================================================
 def get_temps_safe():
     cpu_temp = gpu_temp = "N/A"
     try:
-        temps = getattr(psutil, "sensors_temperatures", lambda: {})()
-        if temps:
-            if "coretemp" in temps and temps["coretemp"]:
+        if hasattr(psutil, "sensors_temperatures"):
+            temps = psutil.sensors_temperatures()
+            if "coretemp" in temps:
                 cpu_temp = f"{temps['coretemp'][0].current:.0f}°C"
-            elif "cpu_thermal" in temps and temps["cpu_thermal"]:
+            if "cpu_thermal" in temps:
                 cpu_temp = f"{temps['cpu_thermal'][0].current:.0f}°C"
-            if "amdgpu" in temps and temps["amdgpu"]:
+            if "amdgpu" in temps:
                 gpu_temp = f"{temps['amdgpu'][0].current:.0f}°C"
-            elif "gpu" in temps and temps["gpu"]:
+            if "gpu" in temps:
                 gpu_temp = f"{temps['gpu'][0].current:.0f}°C"
-    except Exception:
+    except:
         pass
     return cpu_temp, gpu_temp
 
-# ──────────────────────────────────────────────
+
 def get_ping_ms(host="8.8.8.8"):
     try:
-        result = ping(host, timeout=1)
-        if result is None:
-            return "N/A"
-        return f"{int(result * 1000)} ms"
-    except Exception:
+        r = ping(host, timeout=1)
+        return f"{int(r * 1000)} ms" if r else "N/A"
+    except:
         return "N/A"
 
-# ──────────────────────────────────────────────
+
+# =====================================================================
+# MUSIC NOW PLAYING
+# =====================================================================
+def get_song():
+    try:
+        CoInitialize()
+        sessions = AudioUtilities.GetAllSessions()
+        for s in sessions:
+            if s.SimpleAudioVolume.GetMute() is False:
+                disp = s.DisplayName
+                if disp and "System Sounds" not in disp:
+                    return disp
+    except:
+        pass
+    return "None"
+
+
+# =====================================================================
+# SAVE / LOAD WINDOW POSITION
+# =====================================================================
 def load_config():
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r") as f:
                 return json.load(f)
         except:
-            return {"x": 20, "y": 40}
+            pass
     return {"x": 20, "y": 40}
+
 
 def save_config(x, y):
     with open(CONFIG_PATH, "w") as f:
         json.dump({"x": x, "y": y}, f)
 
-# ──────────────────────────────────────────────
-# Tkinter overlay setup
+
+# =====================================================================
+# TK OVERLAY SETTINGS
+# =====================================================================
 root = Tk()
-root.attributes("-topmost", True)
-root.attributes("-alpha", 0.9)
 root.overrideredirect(True)
+root.attributes("-topmost", True)
+root.attributes("-alpha", 0.90)
+
+# Rounded Corner Background Canvas
+canvas = Canvas(root, width=260, height=150, bg="#000000", highlightthickness=0)
+canvas.pack(fill="both", expand=True)
+
+# Draw rounded rectangle
+def draw_round():
+    canvas.delete("all")
+    r = 20
+    w = 260
+    h = 150
+    canvas.create_rectangle(
+        r, 0, w - r, h, fill="#0a0a0a", outline="#0a0a0a"
+    )
+    canvas.create_oval(0, 0, r * 2, r * 2, fill="#0a0a0a", outline="")
+    canvas.create_oval(w - r * 2, 0, w, r * 2, fill="#0a0a0a", outline="")
+    canvas.create_oval(0, h - r * 2, r * 2, h, fill="#0a0a0a", outline="")
+    canvas.create_oval(w - r * 2, h - r * 2, w, h, fill="#0a0a0a", outline="")
+
+draw_round()
 
 lbl = Label(
     root,
-    justify="left",
-    font=("Consolas", 11),
+    bg="#0a0a0a",
     fg="lime",
-    bg="#101010",
-    padx=10,
-    pady=6,
+    font=("Consolas", 11),
+    justify="left"
 )
-lbl.pack(fill="both", expand=True)
+lbl.place(x=15, y=15)
 
+# Restore position
 config = load_config()
-root.geometry(f"250x120+{config['x']}+{config['y']}")
+root.geometry(f"260x150+{config['x']}+{config['y']}")
 
-# Click-through
-hwnd = windll.user32.GetParent(root.winfo_id())
-ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, ex_style | win32con.WS_EX_LAYERED)
+# =====================================================================
+# DRAGGING
+# =====================================================================
+drag = {"x": 0, "y": 0}
 
-# ──────────────────────────────────────────────
-# Drag to move
-drag_data = {"x": 0, "y": 0}
-def on_press(event):
-    drag_data["x"] = event.x
-    drag_data["y"] = event.y
-def on_drag(event):
-    x = root.winfo_x() + (event.x - drag_data["x"])
-    y = root.winfo_y() + (event.y - drag_data["y"])
+def click(e):
+    drag["x"] = e.x
+    drag["y"] = e.y
+
+def drag_move(e):
+    x = root.winfo_x() + (e.x - drag["x"])
+    y = root.winfo_y() + (e.y - drag["y"])
     root.geometry(f"+{x}+{y}")
-def on_release(event):
+
+def drag_stop(e):
     save_config(root.winfo_x(), root.winfo_y())
 
-root.bind("<Button-1>", on_press)
-root.bind("<B1-Motion>", on_drag)
-root.bind("<ButtonRelease-1>", on_release)
+root.bind("<Button-1>", click)
+root.bind("<B1-Motion>", drag_move)
+root.bind("<ButtonRelease-1>", drag_stop)
 
-# ──────────────────────────────────────────────
+
+# =====================================================================
+# TOGGLE VISIBILITY (F2)
+# =====================================================================
 visible = True
 
-def toggle_overlay():
+def toggle():
     global visible
     visible = not visible
-    if visible:
-        root.deiconify()
-    else:
-        root.withdraw()
+    root.withdraw() if not visible else root.deiconify()
 
-keyboard.add_hotkey("F2", toggle_overlay)
+keyboard.add_hotkey("F2", toggle)
 
-# ──────────────────────────────────────────────
-# System tray
-def create_image():
-    # simple green circle icon
-    image = Image.new("RGB", (64, 64), (0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    draw.ellipse((8, 8, 56, 56), fill=(0, 255, 0))
-    return image
 
-def on_exit(icon, item):
+# =====================================================================
+# TRAY ICON
+# =====================================================================
+def icon_image():
+    img = Image.new("RGB", (64, 64), "black")
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((10, 25, 54, 40), fill="lime")
+    draw.text((18, 10), "HUD", fill="white")
+    return img
+
+def tray_exit(icon):
     icon.stop()
     root.destroy()
-    os._exit(0)
+    sys.exit()
 
-def on_reload(icon, item):
-    os.execl(sys.executable, sys.executable, *sys.argv)
+def tray_reload(icon):
+    os.execv(sys.executable, ["python"] + sys.argv)
 
-def on_toggle(icon, item):
-    toggle_overlay()
+def tray_toggle(icon):
+    toggle()
 
-menu = (
-    item("Toggle Overlay (F2)", on_toggle),
-    item("Reload", on_reload),
-    item("Exit", on_exit),
+tray = pystray.Icon(
+    "OverlayHub",
+    icon_image(),
+    "Overlay Hub",
+    menu=pystray.Menu(
+        pystray.MenuItem("Toggle Overlay", tray_toggle),
+        pystray.MenuItem("Reload", tray_reload),
+        pystray.MenuItem("Exit", tray_exit),
+    )
 )
-icon = pystray.Icon("OverlayHub", create_image(), "OverlayHub", menu)
+tray.run_detached()
 
-def run_tray():
-    icon.run()
 
-threading.Thread(target=run_tray, daemon=True).start()
-
-# ──────────────────────────────────────────────
+# =====================================================================
+# UPDATE LOOP
+# =====================================================================
 def update():
-    cpu_usage = psutil.cpu_percent()
-    ram_usage = psutil.virtual_memory().percent
+    cpu = psutil.cpu_percent()
+    ram = psutil.virtual_memory().percent
     cpu_temp, gpu_temp = get_temps_safe()
-    ping_time = get_ping_ms()
+    ping = get_ping_ms()
+    song = get_song()
 
     lbl.config(
         text=(
-            f"⚡ CPU: {cpu_usage:.1f}%  ({cpu_temp})\n"
+            f"⚡ CPU: {cpu:.1f}% ({cpu_temp})\n"
             f"🎮 GPU: {gpu_temp}\n"
-            f"💾 RAM: {ram_usage:.1f}%\n"
-            f"🌐 Ping: {ping_time}\n"
-            f"[F2 to toggle]"
+            f"💾 RAM: {ram:.1f}%\n"
+            f"🌐 Ping: {ping}\n"
+            f"🎵 Music: {song}\n"
+            f"[F2 Hide/Show]"
         )
     )
+
     root.after(1000, update)
 
 update()
